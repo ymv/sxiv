@@ -473,13 +473,52 @@ int fncmp(const void *a, const void *b) {
 	return strcoll(((fileinfo_t*) a)->name, ((fileinfo_t*) b)->name);
 }
 
+void check_add_dir(char *dirname, bool recursive) {
+	int start;
+	char *filename;
+	r_dir_t dir;
+
+	if (r_opendir(&dir, dirname) < 0) {
+		warn("could not open directory: %s", dirname);
+		return;
+	}
+	start = fileidx;
+	while ((filename = r_readdir(&dir, recursive)) != NULL) {
+		check_add_file(filename);
+		free((void*) filename);
+	}
+	r_closedir(&dir);
+	if (fileidx - start > 1)
+		qsort(files + start, fileidx - start, sizeof(fileinfo_t), fncmp);
+}
+
+int find_file(char* filepath, int start) {
+	bool own;
+	int i;
+	if (*filepath != '/') {
+		filepath = absolute_path(filepath);
+		own = true;
+	} else
+		own = false;
+
+	for (i = start; i < fileidx; i++)
+		if (strcoll(files[i].path, filepath) == 0)
+			goto end;
+	i = -1;
+end:
+	if (own)
+		free(filepath);
+	return i;
+}
+
 int main(int argc, char **argv) {
-	int i, start;
+	int i;
 	size_t n;
 	ssize_t len;
 	char *filename;
 	struct stat fstats;
-	r_dir_t dir;
+	char* path_separator_position;
+	int startnum = -1;
 
 	parse_options(argc, argv);
 
@@ -521,24 +560,27 @@ int main(int argc, char **argv) {
 				continue;
 			}
 			if (!S_ISDIR(fstats.st_mode)) {
-				check_add_file(filename);
+				if (options->siblings) {
+					if ((path_separator_position = strrchr(filename, '/'))) {
+						*path_separator_position = '\0';
+						check_add_dir(filename, false);
+						*path_separator_position = '/';
+					} else {
+						check_add_dir(".", false);
+					}
+					if ((startnum = find_file(filename, 0)) == -1) {
+						fprintf(stderr, "sxiv: file not found among it's siblings\n");
+						exit(EXIT_FAILURE);
+					}
+				} else {
+					check_add_file(filename);
+				}
 			} else {
 				if (!options->recursive) {
 					warn("ignoring directory: %s", filename);
 					continue;
 				}
-				if (r_opendir(&dir, filename) < 0) {
-					warn("could not open directory: %s", filename);
-					continue;
-				}
-				start = fileidx;
-				while ((filename = r_readdir(&dir)) != NULL) {
-					check_add_file(filename);
-					free((void*) filename);
-				}
-				r_closedir(&dir);
-				if (fileidx - start > 1)
-					qsort(files + start, fileidx - start, sizeof(fileinfo_t), fncmp);
+				check_add_dir(filename, true);
 			}
 		}
 	}
@@ -549,7 +591,10 @@ int main(int argc, char **argv) {
 	}
 
 	filecnt = fileidx;
-	fileidx = options->startnum < filecnt ? options->startnum : 0;
+	if (startnum != -1)
+		fileidx = startnum;
+	else
+		fileidx = options->startnum < filecnt ? options->startnum : 0;
 
 	win_init(&win);
 	img_init(&img, &win);

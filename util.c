@@ -261,7 +261,7 @@ int r_closedir(r_dir_t *rdir) {
 	return ret;
 }
 
-char* r_readdir(r_dir_t *rdir) {
+char* r_readdir(r_dir_t *rdir, bool recursive) {
 	size_t len;
 	char *filename;
 	struct dirent *dentry;
@@ -284,6 +284,8 @@ char* r_readdir(r_dir_t *rdir) {
 			if (stat(filename, &fstats) < 0)
 				continue;
 			if (S_ISDIR(fstats.st_mode)) {
+				if (!recursive)
+					continue;
 				/* put subdirectory on the stack */
 				if (rdir->stlen == rdir->stcap) {
 					rdir->stcap *= 2;
